@@ -6,10 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glam = "0.24.2"
+glam = "0.23"
 typed-arena = "2.0.2"
 itertools = "0.11"
 
 [dev-dependencies]
 rand = "0.8"
 svg = "0.14"
+# winit = "0.29.3"
+nannou = { git = "https://github.com/conradludgate/nannou", rev = "8ec1dfcba0071e539f12f755097584447dc96a84" }

@@ -57,6 +57,32 @@ impl<V: VecT> Triangle<V> {
     }
 }
 
+fn sign(p1: Vec2, p2: Vec2, p3: Vec2) -> f32 {
+    (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y)
+}
+
+impl Triangle<Vec2> {
+    pub fn point_inside(self, pt: Vec2) -> bool {
+        let [v1, v2, v3] = self.0;
+        let d1 = sign(pt, v1, v2);
+        let d2 = sign(pt, v2, v3);
+        let d3 = sign(pt, v3, v1);
+
+        let has_neg = (d1 < 0.0) || (d2 < 0.0) || (d3 < 0.0);
+        let has_pos = (d1 > 0.0) || (d2 > 0.0) || (d3 > 0.0);
+
+        !(has_neg && has_pos)
+    }
+}
+
+impl BoundingBox<Vec2> {
+    pub fn point_inside(self, pt: Vec2) -> bool {
+        let x = self.min.x..=self.max.x;
+        let y = self.min.y..=self.max.y;
+        x.contains(&pt.x) && y.contains(&pt.y)
+    }
+}
+
 impl<V: VecT> BoundingBox<V> {
     pub fn merge(self, other: Self) -> Self {
         Self {
@@ -71,12 +97,12 @@ impl<V: VecT> BoundingBox<V> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct BVHNode<'a, V> {
+pub struct BVHNode<'a, V> {
     // Range<usize>
-    triangles: (usize, usize),
-    children: Option<[&'a BVHNode<'a, V>; 2]>,
-    bb: BoundingBox<V>,
-    height: usize,
+    pub triangles: (usize, usize),
+    pub children: Option<[&'a BVHNode<'a, V>; 2]>,
+    pub bb: BoundingBox<V>,
+    pub height: usize,
 }
 
 struct TotalF32(f32);
@@ -98,7 +124,7 @@ impl Ord for TotalF32 {
 }
 
 impl<'a, T: VecT> BVHNode<'a, T> {
-    fn new(
+    pub fn new(
         arena: &'a Arena<BVHNode<'a, T>>,
         triangles: &mut [Triangle<T>],
         offset: usize,
@@ -152,10 +178,6 @@ mod tests {
     use typed_arena::Arena;
 
     use crate::{BVHNode, Triangle};
-
-    fn t(x: Vec2, y: Vec2, z: Vec2) -> Triangle<Vec2> {
-        Triangle([x, y, z])
-    }
 
     #[test]
     fn test_bvh() {
