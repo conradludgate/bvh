@@ -1,60 +1,10 @@
-// use winit::{
-//     event::{Event, WindowEvent},
-//     event_loop::{ControlFlow, EventLoop},
-//     window::WindowBuilder,
-// };
-
-// fn main() {
-//     let event_loop = EventLoop::new().unwrap();
-//     let window = WindowBuilder::new().build(&event_loop).unwrap();
-
-//     // ControlFlow::Wait pauses the event loop if no events are available to process.
-//     // This is ideal for non-game applications that only update in response to user
-//     // input, and uses significantly less power/CPU time than ControlFlow::Poll.
-//     event_loop.set_control_flow(ControlFlow::Wait);
-
-//     event_loop
-//         .run(move |event, elwt| {
-//             match event {
-//                 Event::WindowEvent {
-//                     event: WindowEvent::CloseRequested,
-//                     ..
-//                 } => {
-//                     elwt.exit();
-//                 }
-//                 Event::AboutToWait => {
-//                     // Application update code.
-
-//                     // Queue a RedrawRequested event.
-//                     //
-//                     // You only need to call this if you've determined that you need to redraw, in
-//                     // applications which do not always need to. Applications that redraw continuously
-//                     // can just render here instead.
-//                     window.request_redraw();
-//                 }
-//                 Event::WindowEvent {
-//                     event: WindowEvent::RedrawRequested,
-//                     ..
-//                 } => {
-//                     // Redraw the application.
-//                     //
-//                     // It's preferable for applications that do not render continuously to render in
-//                     // this event rather than in AboutToWait, since rendering in here allows
-//                     // the program to gracefully handle redraws requested by the OS.
-//                 }
-//                 _ => (),
-//             }
-//         })
-//         .unwrap();
-// }
-
 use bvh::{BVHNode, BoundingBox, Triangle};
 use nannou::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use typed_arena::Arena;
 
 struct Model<'a> {
-    rng: StdRng,
+    _rng: StdRng,
     triangles: Vec<Triangle<Vec2>>,
     bvh: &'a bvh::BVHNode<'a, Vec2>,
 }
@@ -68,7 +18,7 @@ fn main() {
         .run();
 }
 
-fn model<'a>(arena: &'a Arena<BVHNode<'a, Vec2>>, app: &App) -> Model<'a> {
+fn model<'a>(arena: &'a Arena<BVHNode<'a, Vec2>>, _app: &App) -> Model<'a> {
     let x_range = -500.0..500.0;
     let y_range = -500.0..500.0;
     let r_range = 20.0..60.0;
@@ -105,21 +55,13 @@ fn model<'a>(arena: &'a Arena<BVHNode<'a, Vec2>>, app: &App) -> Model<'a> {
     let bvh = BVHNode::new(arena, &mut triangles, 0);
 
     Model {
-        rng,
+        _rng: rng,
         triangles,
         bvh,
     }
 }
 
-fn event(_app: &App, model: &mut Model, event: Event) {
-    // match event {
-    //     Event::WindowEvent { id, simple } => todo!(),
-    //     Event::DeviceEvent(_, _) => todo!(),
-    //     Event::Update(_) => todo!(),
-    //     Event::Suspended => todo!(),
-    //     Event::Resumed => todo!(),
-    // }
-}
+fn event(_app: &App, _model: &mut Model, _event: Event) {}
 
 fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();

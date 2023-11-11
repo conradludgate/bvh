@@ -1,9 +1,10 @@
 use std::{
+    f32::EPSILON,
     fmt::Debug,
     ops::{Add, Div, Sub},
 };
 
-use glam::Vec2;
+use glam::{vec3, Vec2, Vec3};
 use itertools::Itertools;
 use typed_arena::Arena;
 
@@ -39,6 +40,24 @@ impl VecT for Vec2 {
 
     fn axis(&self, axis: usize) -> f32 {
         [self.x, self.y][axis]
+    }
+}
+
+impl VecT for Vec3 {
+    fn min(self, rhs: Self) -> Self {
+        self.min(rhs)
+    }
+
+    fn max(self, rhs: Self) -> Self {
+        self.max(rhs)
+    }
+
+    fn axes() -> usize {
+        3
+    }
+
+    fn axis(&self, axis: usize) -> f32 {
+        [self.x, self.y, self.z][axis]
     }
 }
 
@@ -83,6 +102,163 @@ impl BoundingBox<Vec2> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct Ray {
+    pub origin: Vec3,
+    pub direction: Vec3,
+}
+
+impl Triangle<Vec3> {
+    pub fn intersection(self, ray: Ray) -> Option<Vec3> {
+        // https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+        let [v0, v1, v2] = self.0;
+        let (e1, e2) = (v1 - v0, v2 - v0);
+        let h = ray.direction.cross(e2);
+        let a = e1.dot(h);
+
+        if (-EPSILON..EPSILON).contains(&a) {
+            return None;
+        }
+
+        let f = a.recip();
+        let s = ray.origin - v0;
+        let u = f * s.dot(h);
+
+        if !(0.0..=1.0).contains(&u) {
+            return None;
+        }
+
+        let q = s.cross(e1);
+        let v = f * ray.direction.dot(q);
+
+        if v < 0.0 || u + v > 1.0 {
+            return None;
+        }
+
+        let t = f * e2.dot(q);
+
+        if t > EPSILON {
+            Some(ray.origin + ray.direction * t)
+        } else {
+            None
+        }
+    }
+
+    pub fn normal(self) -> Vec3 {
+        let [v0, v1, v2] = self.0;
+        let (e1, e2) = (v1 - v0, v2 - v0);
+        e1.cross(e2)
+    }
+}
+
+impl BoundingBox<Vec3> {
+    pub fn intersection(self, ray: Ray) -> Option<Vec3> {
+        // https://web.archive.org/web/20090803054252/http://tog.acm.org/resources/GraphicsGems/gems/RayBox.c
+        #[derive(PartialEq)]
+        enum Foo {
+            Right,
+            Left,
+            Middle,
+        }
+        let mut inside = true;
+        let mut candidate = Vec3::ZERO;
+
+        /* Find candidate planes; this loop can be avoided if
+        rays cast all from the eye(assume perpsective view) */
+        let x = if ray.origin.x < self.min.x {
+            inside = false;
+            candidate.x = self.min.x;
+            Foo::Left
+        } else if ray.origin.x > self.max.x {
+            inside = false;
+            candidate.x = self.max.x;
+            Foo::Right
+        } else {
+            Foo::Middle
+        };
+        let y = if ray.origin.y < self.min.y {
+            inside = false;
+            candidate.y = self.min.y;
+            Foo::Left
+        } else if ray.origin.y > self.max.y {
+            inside = false;
+            candidate.y = self.max.y;
+            Foo::Right
+        } else {
+            Foo::Middle
+        };
+        let z = if ray.origin.y < self.min.y {
+            inside = false;
+            candidate.z = self.min.z;
+            Foo::Left
+        } else if ray.origin.y > self.max.y {
+            inside = false;
+            candidate.z = self.max.z;
+            Foo::Right
+        } else {
+            Foo::Middle
+        };
+
+        /* Ray origin inside bounding box */
+        if inside {
+            return Some(ray.origin);
+        }
+
+        /* Calculate T distances to candidate planes */
+        let x = if x != Foo::Middle && ray.direction.x != 0.0 {
+            (candidate.x - ray.origin.x) / ray.direction.x
+        } else {
+            -1.0
+        };
+        let y = if y != Foo::Middle && ray.direction.y != 0.0 {
+            (candidate.y - ray.origin.y) / ray.direction.y
+        } else {
+            -1.0
+        };
+        let z = if z != Foo::Middle && ray.direction.z != 0.0 {
+            (candidate.z - ray.origin.z) / ray.direction.z
+        } else {
+            -1.0
+        };
+
+        /* Get largest of the maxT's for final choice of intersection */
+        if x < z && y < z {
+            let c = vec3(
+                ray.origin.x + z * ray.direction.x,
+                ray.origin.y + z * ray.direction.y,
+                z,
+            );
+            if c.x < self.min.x || c.x > self.max.x || c.y < self.min.y || c.y > self.max.y {
+                None
+            } else {
+                Some(c)
+            }
+        } else if x < y && z < y {
+            let c = vec3(
+                ray.origin.x + y * ray.direction.x,
+                y,
+                ray.origin.z + y * ray.direction.z,
+            );
+            if c.x < self.min.x || c.x > self.max.x || c.z < self.min.z || c.z > self.max.z {
+                None
+            } else {
+                Some(c)
+            }
+        } else {
+            let c = vec3(
+                x,
+                ray.origin.y + x * ray.direction.y,
+                ray.origin.z + x * ray.direction.z,
+            );
+            if c.y < self.min.y || c.y > self.max.y || c.z < self.min.z || c.z > self.max.z {
+                None
+            } else {
+                Some(c)
+            }
+        }
+    }
+}
+
 impl<V: VecT> BoundingBox<V> {
     pub fn merge(self, other: Self) -> Self {
         Self {
@@ -105,7 +281,7 @@ pub struct BVHNode<'a, V> {
     pub height: usize,
 }
 
-struct TotalF32(f32);
+pub struct TotalF32(pub f32);
 impl Eq for TotalF32 {}
 impl PartialEq for TotalF32 {
     fn eq(&self, other: &Self) -> bool {
@@ -302,18 +478,18 @@ mod tests {
     }
 
     fn oklab_to_linear_srgb(c: Lab) -> [f32; 3] {
-        let l_ = c.l + 0.3963377774 * c.a + 0.2158037573 * c.b;
-        let m_ = c.l - 0.1055613458 * c.a - 0.0638541728 * c.b;
-        let s_ = c.l - 0.0894841775 * c.a - 1.2914855480 * c.b;
+        let l_ = c.l + 0.396_337_78 * c.a + 0.215_803_76 * c.b;
+        let m_ = c.l - 0.105_561_346 * c.a - 0.063_854_17 * c.b;
+        let s_ = c.l - 0.089_484_18 * c.a - 1.291_485_5 * c.b;
 
         let l = l_ * l_ * l_;
         let m = m_ * m_ * m_;
         let s = s_ * s_ * s_;
 
         [
-            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+            4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s,
+            -1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s,
+            -0.0041960863 * l - 0.703_418_6 * m + 1.707_614_7 * s,
         ]
     }
 }
