@@ -2,16 +2,19 @@ use std::{
     fs::OpenOptions,
     mem::swap,
     sync::atomic::{self, AtomicUsize},
+    time::Instant,
 };
 
 use bvh::{BVHState, Bvh, Ray, TotalF32, Triangle};
 use glam::{vec3, Vec3};
-use image::{codecs::gif::GifEncoder, Frame, Rgba, RgbaImage};
-use indicatif::ProgressBar;
+use image::{codecs::gif::GifEncoder, Delay, Frame, Rgba, RgbaImage};
+use indicatif::{ProgressBar, ProgressStyle};
 use nannou::prelude::TAU;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 fn main() {
+    let start = Instant::now();
+
     // https://users.cs.utah.edu/~dejohnso/models/teapot.html
     let file = include_str!("utah.txt");
     let (triangles, mut file) = file.split_once('\n').unwrap();
@@ -41,8 +44,8 @@ fn main() {
 
     println!("Loaded geometry");
 
-    let c = 3;
-    let d = 5.0;
+    let c = 2;
+    let d = 10.0;
     for i in -c..=c {
         for j in -c..=c {
             for k in -c..=c {
@@ -71,8 +74,12 @@ fn main() {
     let size = bvh.state.nodes[0].bb.size().max_element();
     // let center = (bvh.bb.min + bvh.bb.max) / 2.0;
 
-    let views = 360;
-    let progress = ProgressBar::new(views);
+    let views = 360 * 3;
+    let progress = ProgressBar::new(views * (WIDTH * HEIGHT) as u64 * (AA * AA) as u64)
+        .with_elapsed(start.elapsed());
+    progress.set_style(
+        ProgressStyle::with_template("{elapsed}/{duration} {wide_bar} {pos}/{len}").unwrap(),
+    );
     let bb = AtomicUsize::new(0);
     let t = AtomicUsize::new(0);
     let mut frames = vec![];
@@ -87,12 +94,16 @@ fn main() {
             let mut bb_count = 0;
             let mut t_count = 0;
 
-            let frame = Frame::new(render(&bvh, origin, &mut bb_count, &mut t_count));
+            let frame = Frame::from_parts(
+                render(&bvh, origin, &mut bb_count, &mut t_count, &progress),
+                0,
+                0,
+                Delay::from_numer_denom_ms(10, 1),
+            );
 
             bb.fetch_add(bb_count, atomic::Ordering::Relaxed);
             t.fetch_add(t_count, atomic::Ordering::Relaxed);
 
-            progress.inc(1);
             frame
         })
         .collect_into_vec(&mut frames);
@@ -101,47 +112,69 @@ fn main() {
         "performed {bb:?} bounding box intersection tests and {t:?} triangle intersection tests"
     );
 
-    let mut gif = GifEncoder::new(
+    let mut gif = GifEncoder::new_with_speed(
         OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
             .open("utah/render.gif")
             .unwrap(),
+        10,
     );
 
     gif.encode_frames(frames).unwrap();
 }
 
-fn render(bvh: &Bvh<Vec3>, origin: Vec3, bb_count: &mut usize, t_count: &mut usize) -> RgbaImage {
-    let mut image = image::RgbaImage::new(500, 500);
+const SCALE: f32 = -1.0 / 600.0;
+const AA: i32 = 4;
+const WIDTH: u32 = 500;
+const HEIGHT: u32 = 500;
+
+fn render(
+    bvh: &Bvh<Vec3>,
+    origin: Vec3,
+    bb_count: &mut usize,
+    t_count: &mut usize,
+    progress: &ProgressBar,
+) -> RgbaImage {
+    let mut image = image::RgbaImage::new(WIDTH, HEIGHT);
     let bb = bvh.state.nodes[0].bb;
     let center = (bb.min + bb.max) / 2.0;
     let direction = (center - origin).normalize();
 
     let side = direction.cross(Vec3::Y);
 
-    let scale = -1.0 / 600.0;
+    let scale = SCALE / (AA as f32);
     for xp in 0..image.width() {
         for yp in 0..image.height() {
-            let x = (xp as i32 - image.width() as i32 / 2) as f32 * scale;
-            let y = (yp as i32 - image.height() as i32 / 2) as f32 * scale;
-            let direction = (y * Vec3::Y + x * side + direction).normalize();
+            let mut colour = 0;
+            for xaa in 0..AA {
+                for yaa in 0..AA {
+                    let x = ((xp as i32 - image.width() as i32 / 2) * AA + xaa) as f32 * scale;
+                    let y = ((yp as i32 - image.height() as i32 / 2) * AA + yaa) as f32 * scale;
+                    let direction = (y * Vec3::Y + x * side + direction).normalize();
 
-            if let Some((_, i)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count) {
-                let t = bvh.state.triangles[i];
-                let n = t.normal().normalize();
-                // https://math.stackexchange.com/a/13263
-                let r = direction - 2.0 * (direction.dot(n)) * n;
-                let r = r.normalize();
-                let angle_with_sun = r.dot(vec3(0.0, 1.0, 0.0));
+                    if let Some((_, i)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count)
+                    {
+                        let t = bvh.state.triangles[i];
+                        let n = t.normal().normalize();
+                        // https://math.stackexchange.com/a/13263
+                        let r = direction - 2.0 * (direction.dot(n)) * n;
+                        let r = r.normalize();
+                        let angle_with_sun = r.dot(vec3(0.0, 1.0, 0.0));
 
-                let a = (angle_with_sun.cos().abs() * 255.0) as u8;
-                image.put_pixel(xp, yp, Rgba([a, a, a, 255]));
-                // image.put_pixel(xp, yp, Rgba([255, 255, 255, 255]));
-            } else {
-                image.put_pixel(xp, yp, Rgba([0, 0, 0, 255]));
+                        let a = (angle_with_sun.cos().abs() * 255.0) as i32;
+                        colour += a;
+                        // image.put_pixel(xp, yp, Rgba([a, a, a, 255]));
+                        // image.put_pixel(xp, yp, Rgba([255, 255, 255, 255]));
+                    } else {
+                        // image.put_pixel(xp, yp, Rgba([0, 0, 0, 255]));
+                    }
+                    progress.inc(1);
+                }
             }
+            let c = (colour / AA / AA) as u8;
+            image.put_pixel(xp, yp, Rgba([c, c, c, 255]));
         }
     }
 
