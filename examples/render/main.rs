@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 
 use bvh::{BVHNode, Ray, TotalF32, Triangle};
-use glam::{vec3, Vec3, Quat};
+use glam::{vec3, Vec3, Quat, EulerRot};
 use image::{codecs::gif::GifEncoder, Frame, Rgb, Rgba, RgbaImage};
 use nannou::prelude::TAU;
 use typed_arena::Arena;
@@ -69,13 +69,16 @@ fn render<'a>(
     let center = (bvh.bb.min + bvh.bb.max) / 2.0;
     let direction = (center - origin).normalize();
 
+    let side = direction.cross(Vec3::Y);
+
     let scale = -1.0 / 120.0;
     for xp in 0..image.width() {
         for yp in 0..image.height() {
             let x = (xp as i32 - image.width() as i32 / 2) as f32 * scale;
             let y = (yp as i32 - image.height() as i32 / 2) as f32 * scale;
-            let direction = (vec3(x, y, 0.0) + direction).normalize();
-            // let direction = Quat::from_rotation_(angle) direction
+            let direction = (y * Vec3::Y + x * side + direction).normalize();
+            // let direction = Quat::from_rotation_x(x) * Quat::from_rotation_y(y) * direction;
+            // let direction = Quat::from_euler(EulerRot::XYZ, x, y, 0.0) * direction;
 
             if let Some((_, i)) = test(bvh, triangles, Ray { origin, direction }) {
                 let t = triangles[i];
