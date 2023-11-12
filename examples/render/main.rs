@@ -1,8 +1,8 @@
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 
 use bvh::{BVHNode, Ray, TotalF32, Triangle};
-use glam::{vec3, Vec3, Quat, EulerRot};
-use image::{codecs::gif::GifEncoder, Frame, Rgb, Rgba, RgbaImage};
+use glam::{vec3, Vec3};
+use image::{codecs::gif::GifEncoder, Frame, Rgba, RgbaImage};
 use nannou::prelude::TAU;
 use typed_arena::Arena;
 
@@ -71,7 +71,7 @@ fn render<'a>(
 
     let side = direction.cross(Vec3::Y);
 
-    let scale = -1.0 / 120.0;
+    let scale = -1.0 / 240.0;
     for xp in 0..image.width() {
         for yp in 0..image.height() {
             let x = (xp as i32 - image.width() as i32 / 2) as f32 * scale;
@@ -90,7 +90,7 @@ fn render<'a>(
 
                 let a = (angle_with_sun.cos().abs() * 255.0) as u8;
                 image.put_pixel(xp, yp, Rgba([a, a, a, 255]));
-                // image.put_pixel(xp, yp, Rgb([255,255,255]));
+                // image.put_pixel(xp, yp, Rgba([255, 255, 255, 255]));
             } else {
                 image.put_pixel(xp, yp, Rgba([0, 0, 0, 255]));
             }
@@ -105,7 +105,7 @@ fn test<'a>(
     triangles: &[Triangle<Vec3>],
     ray: Ray,
 ) -> Option<(f32, usize)> {
-    if bvh.bb.intersection(ray).is_some() {
+    if bvh.bb.intersection(ray) {
         if let Some([l, r]) = bvh.children {
             match (test(l, triangles, ray), test(r, triangles, ray)) {
                 (None, None) => None,
@@ -126,7 +126,7 @@ fn test<'a>(
                 .filter_map(|(i, t)| {
                     let p = t.intersection(ray)?;
                     let dist = p.distance(ray.origin);
-                    Some((dist, i))
+                    Some((dist, i + bvh.triangles.0))
                 })
                 .min_by_key(|&(dist, _)| TotalF32(dist))
         }

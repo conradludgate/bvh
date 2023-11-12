@@ -4,7 +4,7 @@ use std::{
     ops::{Add, Div, Sub},
 };
 
-use glam::{vec3, Vec2, Vec3};
+use glam::{Vec2, Vec3};
 use itertools::Itertools;
 use typed_arena::Arena;
 
@@ -152,110 +152,30 @@ impl Triangle<Vec3> {
 }
 
 impl BoundingBox<Vec3> {
-    pub fn intersection(self, ray: Ray) -> Option<Vec3> {
-        // https://web.archive.org/web/20090803054252/http://tog.acm.org/resources/GraphicsGems/gems/RayBox.c
-        #[derive(PartialEq)]
-        enum Foo {
-            Right,
-            Left,
-            Middle,
-        }
-        let mut inside = true;
-        let mut candidate = Vec3::ZERO;
+    pub fn intersection(self, ray: Ray) -> bool {
+        // https://tavianator.com/2022/ray_box_boundary.html
+        let mut tmin = 0.0;
+        let mut tmax = f32::INFINITY;
 
-        /* Find candidate planes; this loop can be avoided if
-        rays cast all from the eye(assume perpsective view) */
-        let x = if ray.origin.x < self.min.x {
-            inside = false;
-            candidate.x = self.min.x;
-            Foo::Left
-        } else if ray.origin.x > self.max.x {
-            inside = false;
-            candidate.x = self.max.x;
-            Foo::Right
-        } else {
-            Foo::Middle
-        };
-        let y = if ray.origin.y < self.min.y {
-            inside = false;
-            candidate.y = self.min.y;
-            Foo::Left
-        } else if ray.origin.y > self.max.y {
-            inside = false;
-            candidate.y = self.max.y;
-            Foo::Right
-        } else {
-            Foo::Middle
-        };
-        let z = if ray.origin.y < self.min.y {
-            inside = false;
-            candidate.z = self.min.z;
-            Foo::Left
-        } else if ray.origin.y > self.max.y {
-            inside = false;
-            candidate.z = self.max.z;
-            Foo::Right
-        } else {
-            Foo::Middle
-        };
+        let t1 = (self.min.x - ray.origin.x) / ray.direction.x;
+        let t2 = (self.max.x - ray.origin.x) / ray.direction.x;
 
-        /* Ray origin inside bounding box */
-        if inside {
-            return Some(ray.origin);
-        }
+        tmin = f32::max(tmin, f32::min(t1, t2));
+        tmax = f32::min(tmax, f32::max(t1, t2));
 
-        /* Calculate T distances to candidate planes */
-        let x = if x != Foo::Middle && ray.direction.x != 0.0 {
-            (candidate.x - ray.origin.x) / ray.direction.x
-        } else {
-            -1.0
-        };
-        let y = if y != Foo::Middle && ray.direction.y != 0.0 {
-            (candidate.y - ray.origin.y) / ray.direction.y
-        } else {
-            -1.0
-        };
-        let z = if z != Foo::Middle && ray.direction.z != 0.0 {
-            (candidate.z - ray.origin.z) / ray.direction.z
-        } else {
-            -1.0
-        };
+        let t1 = (self.min.y - ray.origin.y) / ray.direction.y;
+        let t2 = (self.max.y - ray.origin.y) / ray.direction.y;
 
-        /* Get largest of the maxT's for final choice of intersection */
-        if x < z && y < z {
-            let c = vec3(
-                ray.origin.x + z * ray.direction.x,
-                ray.origin.y + z * ray.direction.y,
-                z,
-            );
-            if c.x < self.min.x || c.x > self.max.x || c.y < self.min.y || c.y > self.max.y {
-                None
-            } else {
-                Some(c)
-            }
-        } else if x < y && z < y {
-            let c = vec3(
-                ray.origin.x + y * ray.direction.x,
-                y,
-                ray.origin.z + y * ray.direction.z,
-            );
-            if c.x < self.min.x || c.x > self.max.x || c.z < self.min.z || c.z > self.max.z {
-                None
-            } else {
-                Some(c)
-            }
-        } else {
-            let c = vec3(
-                x,
-                ray.origin.y + x * ray.direction.y,
-                ray.origin.z + x * ray.direction.z,
-            );
-            if c.y < self.min.y || c.y > self.max.y || c.z < self.min.z || c.z > self.max.z {
-                None
-            } else {
-                Some(c)
-            }
-        }
+        tmin = f32::max(tmin, f32::min(t1, t2));
+        tmax = f32::min(tmax, f32::max(t1, t2));
+
+        let t1 = (self.min.z - ray.origin.z) / ray.direction.z;
+        let t2 = (self.max.z - ray.origin.z) / ray.direction.z;
+
+        tmin = f32::max(tmin, f32::min(t1, t2));
+        tmax = f32::min(tmax, f32::max(t1, t2));
+
+        tmin < tmax
     }
 }
 
