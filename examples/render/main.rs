@@ -165,7 +165,6 @@ fn test<'a>(
     bb_count: &mut usize,
     t_count: &mut usize,
 ) -> Option<(f32, usize)> {
-    // if bvh.bb.intersection(ray) {
     if let Some([mut l, mut r]) = bvh.children {
         let mut l1 = l.bb.intersection(ray);
         let mut r1 = r.bb.intersection(ray);
@@ -204,7 +203,4 @@ fn test<'a>(
             })
             .min_by_key(|&(dist, _)| TotalF32(dist))
     }
-    // } else {
-    //     None
-    // }
 }

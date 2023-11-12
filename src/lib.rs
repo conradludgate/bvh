@@ -6,18 +6,23 @@ use std::{
 
 use glam::{Vec2, Vec3};
 use itertools::Itertools;
-use typed_arena::Arena;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Triangle<T>(pub [T; 3]);
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct BoundingBox<T> {
     pub min: T,
     pub max: T,
 }
 
 pub trait VecT:
-    Sized + Add<Self, Output = Self> + Sub<Self, Output = Self> + Div<f32, Output = Self> + Copy + Debug
+    Sized
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Div<f32, Output = Self>
+    + Copy
+    + Debug
+    + Default
 {
     fn min(self, rhs: Self) -> Self;
     fn max(self, rhs: Self) -> Self;
@@ -192,13 +197,33 @@ impl<V: VecT> BoundingBox<V> {
     }
 }
 
+pub struct Bvh<T> {
+    pub state: BVHState<T>,
+    pub height: usize,
+}
+
+pub struct BVHState<T> {
+    pub triangles: Vec<Triangle<T>>,
+    pub nodes: Vec<BVHNode<T>>,
+}
+
+impl<T> BVHState<T> {
+    pub fn new(triangles: Vec<Triangle<T>>) -> Self {
+        Self {
+            nodes: Vec::with_capacity(triangles.len().ilog2() as usize),
+            triangles,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct BVHNode<'a, V> {
+pub struct BVHNode<V> {
     // Range<usize>
     pub triangles: (usize, usize),
-    pub children: Option<[&'a BVHNode<'a, V>; 2]>,
+    // index in BVHState::nodes to the first of a pair of children nodes
+    pub children: Option<usize>,
     pub bb: BoundingBox<V>,
-    pub height: usize,
+    // pub height: usize,
 }
 
 pub struct TotalF32(pub f32);
@@ -219,45 +244,67 @@ impl Ord for TotalF32 {
     }
 }
 
-impl<'a, T: VecT> BVHNode<'a, T> {
-    pub fn new(
-        arena: &'a Arena<BVHNode<'a, T>>,
-        triangles: &mut [Triangle<T>],
-        offset: usize,
-    ) -> &'a Self {
-        let bounding_box = triangles
-            .iter()
-            .map(|t| t.bounding_box())
-            .tree_fold1(BoundingBox::merge)
-            .expect("triangles length should be > 0");
+impl<T: VecT> Bvh<T> {
+    pub fn new(mut state: BVHState<T>) -> Bvh<T> {
+        state.nodes.clear();
 
-        if triangles.len() <= 4 {
-            return arena.alloc(BVHNode {
-                triangles: (offset, offset + triangles.len()),
-                children: None,
-                bb: bounding_box,
-                height: 0,
-            });
+        state.nodes.push(BVHNode {
+            triangles: (0, state.triangles.len()),
+            children: None,
+            bb: Default::default(),
+        });
+
+        let mut height = 0;
+        let mut i = 0;
+
+        loop {
+            let j = state.nodes.len();
+
+            for i in i..j {
+                let nodes_len = state.nodes.len();
+                let node = &mut state.nodes[i];
+                let t = node.triangles;
+
+                let triangles = &mut state.triangles[t.0..t.1];
+
+                node.bb = triangles
+                    .iter()
+                    .map(|t| t.bounding_box())
+                    .tree_fold1(BoundingBox::merge)
+                    .expect("triangles length should be > 0");
+
+                if triangles.len() > 4 {
+                    let axes = T::axes();
+                    let axis = (0..axes)
+                        .max_by_key(|&axis| TotalF32(node.bb.size().axis(axis)))
+                        .expect("vector should have axes > 0");
+
+                    let mid = (triangles.len() + 1) / 2;
+                    triangles
+                        .select_nth_unstable_by_key(mid, |t| TotalF32(t.centroid().axis(axis)));
+
+                    node.children = Some(nodes_len);
+                    state.nodes.push(BVHNode {
+                        triangles: (t.0, t.0 + mid),
+                        children: None,
+                        bb: Default::default(),
+                    });
+                    state.nodes.push(BVHNode {
+                        triangles: (t.0 + mid, t.1),
+                        children: None,
+                        bb: Default::default(),
+                    });
+                }
+            }
+            if i == j {
+                break;
+            }
+
+            i = j;
+            height += 1;
         }
 
-        let axes = T::axes();
-        let axis = (0..axes)
-            .max_by_key(|&axis| TotalF32(bounding_box.size().axis(axis)))
-            .expect("vector should have axes > 0");
-
-        let mid = (triangles.len() + 1) / 2;
-        triangles.select_nth_unstable_by_key(mid, |t| TotalF32(t.centroid().axis(axis)));
-        let (left, right) = triangles.split_at_mut(mid);
-
-        let left = Self::new(arena, left, offset);
-        let right = Self::new(arena, right, offset + mid);
-
-        arena.alloc(BVHNode {
-            height: usize::max(left.height, right.height) + 1,
-            triangles: (offset, offset + triangles.len()),
-            children: Some([left, right]),
-            bb: bounding_box,
-        })
+        Bvh { state, height }
     }
 }
 
@@ -271,14 +318,11 @@ mod tests {
         node::element::{path::Data, Group, Path, Rectangle},
         Document, Node,
     };
-    use typed_arena::Arena;
 
-    use crate::{BVHNode, Triangle};
+    use crate::{BVHState, Bvh, Triangle};
 
     #[test]
     fn test_bvh() {
-        let arena = Arena::new();
-
         let min = 100.0;
         let max = 900.0;
         let min_r = 5.0;
@@ -315,43 +359,46 @@ mod tests {
 
         let mut doc = Document::new().set("viewBox", (0, 0, 1000, 1000));
 
-        let bvh = BVHNode::new(&arena, &mut triangles, 0);
+        let bvh = Bvh::new(BVHState::new(triangles));
+
+        dbg!(bvh.height);
 
         doc = doc
             .set("fill", "none")
             .set("stroke-width", 2)
-            .add(bvh_to_svg(&triangles, bvh));
+            .add(bvh_to_svg(&bvh, 0, 0));
 
         svg::save("test.svg", &doc).unwrap();
     }
 
-    fn bvh_to_svg<'a>(triangles: &[Triangle<Vec2>], bvh: &'a BVHNode<'a, Vec2>) -> Box<dyn Node> {
+    fn bvh_to_svg(bvh: &Bvh<Vec2>, node: usize, depth: usize) -> Box<dyn Node> {
         let mut group = Group::new();
-        let size = bvh.bb.size();
+        let node = bvh.state.nodes[node];
+        let size = node.bb.size();
 
-        let hue_factor = TAU / (triangles.len() as f32);
+        let hue_factor = TAU / (bvh.state.triangles.len() as f32);
 
         group = group.add(
             Rectangle::new()
-                .set("x", bvh.bb.min.x as i32)
-                .set("y", bvh.bb.min.y as i32)
+                .set("x", node.bb.min.x as i32)
+                .set("y", node.bb.min.y as i32)
                 .set("width", size.x as i32)
                 .set("height", size.y as i32)
                 .set(
                     "stroke",
                     colour(
-                        (bvh.triangles.0 as f32) * hue_factor,
-                        0.5 + (bvh.height as f32 + 3.0).recip(),
+                        (node.triangles.0 as f32) * hue_factor,
+                        0.5 + ((bvh.height - depth) as f32 + 3.0).recip(),
                     ),
                 ),
         );
 
-        if let Some([left, right]) = bvh.children {
+        if let Some(i) = node.children {
             group = group
-                .add(bvh_to_svg(triangles, left))
-                .add(bvh_to_svg(triangles, right));
+                .add(bvh_to_svg(bvh, i, depth + 1))
+                .add(bvh_to_svg(bvh, i + 1, depth + 1));
         } else {
-            for (i, t) in triangles[bvh.triangles.0..bvh.triangles.1]
+            for (i, t) in bvh.state.triangles[node.triangles.0..node.triangles.1]
                 .iter()
                 .enumerate()
             {
@@ -366,7 +413,7 @@ mod tests {
                     .set(
                         "stroke",
                         colour(
-                            (bvh.triangles.0 + i) as f32 * hue_factor,
+                            (node.triangles.0 + i) as f32 * hue_factor,
                             0.5 + (bvh.height as f32 + 3.0).recip(),
                         ),
                     )
