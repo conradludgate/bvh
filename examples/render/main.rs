@@ -4,13 +4,12 @@ use std::{
     sync::atomic::{self, AtomicUsize},
 };
 
-use bvh::{BVHNode, Ray, TotalF32, Triangle};
+use bvh::{BVHState, Bvh, Ray, TotalF32, Triangle};
 use glam::{vec3, Vec3};
 use image::{codecs::gif::GifEncoder, Frame, Rgba, RgbaImage};
 use indicatif::ProgressBar;
 use nannou::prelude::TAU;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use typed_arena::Arena;
 
 fn main() {
     // https://users.cs.utah.edu/~dejohnso/models/teapot.html
@@ -65,12 +64,11 @@ fn main() {
 
     println!("Built scene (triangles={})", triangles.len());
 
-    let arena = Arena::new();
-    let bvh = BVHNode::new(&arena, &mut triangles, 0);
+    let bvh = Bvh::new(BVHState::new(triangles));
 
     println!("Generated scene index (height={})", bvh.height);
 
-    let size = bvh.bb.size().max_element();
+    let size = bvh.state.nodes[0].bb.size().max_element();
     // let center = (bvh.bb.min + bvh.bb.max) / 2.0;
 
     let views = 360;
@@ -89,7 +87,7 @@ fn main() {
             let mut bb_count = 0;
             let mut t_count = 0;
 
-            let frame = Frame::new(render(bvh, &triangles, origin, &mut bb_count, &mut t_count));
+            let frame = Frame::new(render(&bvh, origin, &mut bb_count, &mut t_count));
 
             bb.fetch_add(bb_count, atomic::Ordering::Relaxed);
             t.fetch_add(t_count, atomic::Ordering::Relaxed);
@@ -115,15 +113,10 @@ fn main() {
     gif.encode_frames(frames).unwrap();
 }
 
-fn render<'a>(
-    bvh: &'a BVHNode<'a, Vec3>,
-    triangles: &'a [Triangle<Vec3>],
-    origin: Vec3,
-    bb_count: &mut usize,
-    t_count: &mut usize,
-) -> RgbaImage {
+fn render(bvh: &Bvh<Vec3>, origin: Vec3, bb_count: &mut usize, t_count: &mut usize) -> RgbaImage {
     let mut image = image::RgbaImage::new(500, 500);
-    let center = (bvh.bb.min + bvh.bb.max) / 2.0;
+    let bb = bvh.state.nodes[0].bb;
+    let center = (bb.min + bb.max) / 2.0;
     let direction = (center - origin).normalize();
 
     let side = direction.cross(Vec3::Y);
@@ -134,12 +127,9 @@ fn render<'a>(
             let x = (xp as i32 - image.width() as i32 / 2) as f32 * scale;
             let y = (yp as i32 - image.height() as i32 / 2) as f32 * scale;
             let direction = (y * Vec3::Y + x * side + direction).normalize();
-            // let direction = Quat::from_rotation_x(x) * Quat::from_rotation_y(y) * direction;
-            // let direction = Quat::from_euler(EulerRot::XYZ, x, y, 0.0) * direction;
 
-            if let Some((_, i)) = test(bvh, triangles, Ray { origin, direction }, bb_count, t_count)
-            {
-                let t = triangles[i];
+            if let Some((_, i)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count) {
+                let t = bvh.state.triangles[i];
                 let n = t.normal().normalize();
                 // https://math.stackexchange.com/a/13263
                 let r = direction - 2.0 * (direction.dot(n)) * n;
@@ -158,16 +148,19 @@ fn render<'a>(
     image
 }
 
-fn test<'a>(
-    bvh: &'a BVHNode<'a, Vec3>,
-    triangles: &[Triangle<Vec3>],
+fn test(
+    bvh: &Bvh<Vec3>,
+    node: usize,
     ray: Ray,
     bb_count: &mut usize,
     t_count: &mut usize,
 ) -> Option<(f32, usize)> {
-    if let Some([mut l, mut r]) = bvh.children {
-        let mut l1 = l.bb.intersection(ray);
-        let mut r1 = r.bb.intersection(ray);
+    let node = bvh.state.nodes[node];
+    if let Some(child) = node.children {
+        let mut l = child;
+        let mut r = child + 1;
+        let mut l1 = bvh.state.nodes[l].bb.intersection(ray);
+        let mut r1 = bvh.state.nodes[r].bb.intersection(ray);
         *bb_count += 2;
         if l1.is_empty() || (!r1.is_empty() && l1.start > r1.start) {
             swap(&mut l, &mut r);
@@ -176,10 +169,10 @@ fn test<'a>(
         debug_assert!(!l1.is_empty());
 
         // test the closest bounding box
-        if let Some((dist, i)) = test(l, triangles, ray, bb_count, t_count) {
+        if let Some((dist, i)) = test(bvh, l, ray, bb_count, t_count) {
             // if the closest triangle is further than the second bb, test the second
             if !r1.is_empty() && dist >= r1.start {
-                if let Some((dist1, i1)) = test(r, triangles, ray, bb_count, t_count) {
+                if let Some((dist1, i1)) = test(bvh, r, ray, bb_count, t_count) {
                     if dist1 < dist {
                         return Some((dist1, i1));
                     }
@@ -187,19 +180,20 @@ fn test<'a>(
             }
             Some((dist, i))
         } else if !r1.is_empty() {
-            test(r, triangles, ray, bb_count, t_count)
+            test(bvh, r, ray, bb_count, t_count)
         } else {
             None
         }
     } else {
-        triangles[bvh.triangles.0..bvh.triangles.1]
+        let tri = node.triangles;
+        bvh.state.triangles[tri.0..tri.1]
             .iter()
             .enumerate()
             .filter_map(|(i, t)| {
                 *t_count += 1;
                 let p = t.intersection(ray)?;
                 let dist = p.distance(ray.origin);
-                Some((dist, i + bvh.triangles.0))
+                Some((dist, i + tri.0))
             })
             .min_by_key(|&(dist, _)| TotalF32(dist))
     }
