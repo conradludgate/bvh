@@ -15,3 +15,5 @@ rand = "0.8"
 svg = "0.14"
 nannou = { git = "https://github.com/conradludgate/nannou", rev = "f576baa37beb9893b3798b5311cf60707a6390cb" }
 image = "0.24"
+indicatif = "0.17.7"
+rayon = "1"

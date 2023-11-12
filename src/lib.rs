@@ -1,7 +1,7 @@
 use std::{
     f32::EPSILON,
     fmt::Debug,
-    ops::{Add, Div, Sub},
+    ops::{Add, Div, Range, Sub},
 };
 
 use glam::{Vec2, Vec3};
@@ -152,7 +152,7 @@ impl Triangle<Vec3> {
 }
 
 impl BoundingBox<Vec3> {
-    pub fn intersection(self, ray: Ray) -> bool {
+    pub fn intersection(self, ray: Ray) -> Range<f32> {
         // https://tavianator.com/2022/ray_box_boundary.html
         let mut tmin = 0.0;
         let mut tmax = f32::INFINITY;
@@ -175,7 +175,7 @@ impl BoundingBox<Vec3> {
         tmin = f32::max(tmin, f32::min(t1, t2));
         tmax = f32::min(tmax, f32::max(t1, t2));
 
-        tmin < tmax
+        tmin..tmax
     }
 }
 
