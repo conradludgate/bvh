@@ -1,9 +1,13 @@
+use std::fs::{File, OpenOptions};
+
 use bvh::{BVHNode, Ray, TotalF32, Triangle};
-use glam::{vec3, Vec3};
-use image::Rgb;
+use glam::{vec3, Vec3, Quat};
+use image::{codecs::gif::GifEncoder, Frame, Rgb, Rgba, RgbaImage};
+use nannou::prelude::TAU;
 use typed_arena::Arena;
 
 fn main() {
+    // https://users.cs.utah.edu/~dejohnso/models/teapot.html
     let file = include_str!("utah.txt");
     let (triangles, mut file) = file.split_once('\n').unwrap();
     let n: usize = triangles.parse().unwrap();
@@ -33,16 +37,47 @@ fn main() {
     let arena = Arena::new();
     let bvh = BVHNode::new(&arena, &mut triangles, 0);
 
-    let mut image = image::RgbImage::new(200, 200);
-    let origin = vec3(0.0, -1.0, -5.0);
+    let mut gif = GifEncoder::new(
+        OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open("utah/render.gif")
+            .unwrap(),
+    );
+
+    let size = bvh.bb.size().max_element();
+    // let center = (bvh.bb.min + bvh.bb.max) / 2.0;
+
+    for a in 0..360 {
+        let a = (a as f32) / 360.0 * TAU;
+        let x = 2.0 * size * a.sin();
+        let z = 2.0 * size * a.cos();
+        let origin = vec3(x, -1.0, z);
+
+        gif.encode_frame(Frame::new(render(bvh, &triangles, origin)))
+            .unwrap();
+    }
+}
+
+fn render<'a>(
+    bvh: &'a BVHNode<'a, Vec3>,
+    triangles: &'a [Triangle<Vec3>],
+    origin: Vec3,
+) -> RgbaImage {
+    let mut image = image::RgbaImage::new(200, 200);
+    let center = (bvh.bb.min + bvh.bb.max) / 2.0;
+    let direction = (center - origin).normalize();
+
     let scale = -1.0 / 120.0;
     for xp in 0..image.width() {
         for yp in 0..image.height() {
             let x = (xp as i32 - image.width() as i32 / 2) as f32 * scale;
             let y = (yp as i32 - image.height() as i32 / 2) as f32 * scale;
-            let direction = vec3(x, y, 1.0).normalize();
+            let direction = (vec3(x, y, 0.0) + direction).normalize();
+            // let direction = Quat::from_rotation_(angle) direction
 
-            if let Some((_, i)) = test(bvh, &triangles, Ray { origin, direction }) {
+            if let Some((_, i)) = test(bvh, triangles, Ray { origin, direction }) {
                 let t = triangles[i];
                 let n = t.normal().normalize();
                 // https://math.stackexchange.com/a/13263
@@ -51,15 +86,15 @@ fn main() {
                 let angle_with_sun = r.dot(vec3(0.0, 1.0, 0.0));
 
                 let a = (angle_with_sun.cos().abs() * 255.0) as u8;
-                image.put_pixel(xp, yp, Rgb([a, a, a]));
+                image.put_pixel(xp, yp, Rgba([a, a, a, 255]));
                 // image.put_pixel(xp, yp, Rgb([255,255,255]));
             } else {
-                image.put_pixel(xp, yp, Rgb([0, 0, 0]));
+                image.put_pixel(xp, yp, Rgba([0, 0, 0, 255]));
             }
         }
     }
 
-    image.save_with_format("utag.png", image::ImageFormat::Png).unwrap();
+    image
 }
 
 fn test<'a>(
