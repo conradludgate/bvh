@@ -257,6 +257,8 @@ impl<T: VecT> Bvh<T> {
 
                 let triangles = &mut triangles[t.0..t.1];
 
+                // I tested building the boundingbox at the end but it produced a worse
+                // bvh tree so it's not worth it.
                 node.bb = triangles
                     .iter()
                     .map(|t| t.bounding_box())

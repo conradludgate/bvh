@@ -154,9 +154,8 @@ fn render(
                     let y = ((yp as i32 - HEIGHT as i32 / 2) * AA + yaa) as f32 * scale;
                     let direction = (y * Vec3::Y + x * side + direction).normalize();
 
-                    if let Some((_, i)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count)
+                    if let Some((_, t)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count)
                     {
-                        let t = bvh.triangles[i];
                         let n = t.normal().normalize();
                         // https://math.stackexchange.com/a/13263
                         let r = direction - 2.0 * (direction.dot(n)) * n;
@@ -187,7 +186,7 @@ fn test(
     ray: Ray,
     bb_count: &mut usize,
     t_count: &mut usize,
-) -> Option<(f32, usize)> {
+) -> Option<(f32, Triangle<Vec3>)> {
     let node = bvh.nodes[node];
     if let Some(child) = node.children {
         let mut l = child;
@@ -221,12 +220,11 @@ fn test(
         let tri = node.triangles;
         bvh.triangles[tri.0..tri.1]
             .iter()
-            .enumerate()
-            .filter_map(|(i, t)| {
+            .filter_map(|t| {
                 *t_count += 1;
                 let p = t.intersection(ray)?;
                 let dist = p.distance(ray.origin);
-                Some((dist, i + tri.0))
+                Some((dist, *t))
             })
             .min_by_key(|&(dist, _)| TotalF32(dist))
     }
