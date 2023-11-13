@@ -5,8 +5,6 @@ use std::{
 };
 
 use glam::{Vec2, Vec3};
-use itertools::Itertools;
-
 #[derive(Debug, Clone, Copy)]
 pub struct Triangle<T>(pub [T; 3]);
 #[derive(Debug, Clone, Copy, Default)]
@@ -322,7 +320,7 @@ impl<T: VecT> Bvh<T> {
                 node.bb = triangles
                     .iter()
                     .map(|t| t.bounding_box())
-                    .tree_fold1(BoundingBox::merge)
+                    .reduce(BoundingBox::merge)
                     .expect("triangles length should be > 0");
 
                 if triangles.len() > FACTOR {
