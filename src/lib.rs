@@ -208,22 +208,37 @@ impl<T> std::ops::IndexMut<Range<usize>> for Vec<T> {
     }
 }
 
-impl BoundingBox<Vec3> {
-    pub fn intersection(self, ray: Ray) -> Range<f32> {
+impl Ray {
+    #[inline]
+    pub fn box_intersections<const N: usize>(
+        self,
+        boxes: [BoundingBox<Vec3>; N],
+    ) -> [Range<f32>; N] {
         // inspired by https://tavianator.com/2022/ray_box_boundary.html
-        let t1 = (self.min - ray.origin) * ray.dir_inv;
-        let t2 = (self.max - ray.origin) * ray.dir_inv;
+        let mut ts = [Range {
+            start: 0.0,
+            end: 0.0,
+        }; N];
 
-        let t3 = t1.min(t2);
-        let t4 = t1.max(t2);
+        let signs = self.dir_inv.cmplt(Vec3::ZERO);
 
-        let tmin = t3.max_element();
-        let tmax = t4.min_element();
+        for i in 0..N {
+            let bmin = Vec3::select(signs, boxes[i].max, boxes[i].min);
+            let bmax = Vec3::select(signs, boxes[i].min, boxes[i].max);
 
-        Range {
-            start: tmin,
-            end: tmax,
+            let dmin = (bmin - self.origin) * self.dir_inv;
+            let dmax = (bmax - self.origin) * self.dir_inv;
+
+            let tmin = dmin.max_element();
+            let tmax = dmax.min_element();
+
+            ts[i] = Range {
+                start: tmin,
+                end: tmax,
+            };
         }
+
+        ts
     }
 }
 

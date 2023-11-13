@@ -192,8 +192,7 @@ fn test(
     if let Some(child) = node.children {
         let mut l = child;
         let mut r = child + 1;
-        let mut l1 = bvh.nodes[l].bb.intersection(ray);
-        let mut r1 = bvh.nodes[r].bb.intersection(ray);
+        let [mut l1, mut r1] = ray.box_intersections([bvh.nodes[l].bb, bvh.nodes[r].bb]);
         *bb_count += 2;
         if l1.is_empty() || (!r1.is_empty() && l1.start > r1.start) {
             swap(&mut l, &mut r);
