@@ -80,7 +80,7 @@ fn draw_bvh(draw: &Draw, bvh: &Bvh<Vec2>, node: usize, mouse: Vec2, scale: Vec2)
             draw_bvh(draw, bvh, left, mouse, scale);
             draw_bvh(draw, bvh, left + 1, mouse, scale);
         } else {
-            for &triangle in &bvh.triangles[node.triangles.0..node.triangles.1] {
+            for &triangle in &bvh.triangles[node.triangles] {
                 draw_triangle(draw, triangle, mouse, scale)
             }
         }

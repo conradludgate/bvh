@@ -16,3 +16,6 @@ nannou = { git = "https://github.com/conradludgate/nannou", rev = "f576baa37beb9
 image = "0.24"
 indicatif = "0.17.7"
 rayon = "1"
+
+[profile.release]
+debug = true

@@ -1,7 +1,7 @@
 use std::{
     f32::EPSILON,
     fmt::Debug,
-    ops::{Add, Div, Range, Sub},
+    ops::{Add, Div, Sub},
 };
 
 use glam::{Vec2, Vec3};
@@ -111,9 +111,21 @@ impl BoundingBox<Vec2> {
 pub struct Ray {
     pub origin: Vec3,
     pub direction: Vec3,
+    pub dir_inv: Vec3,
+}
+
+impl Ray {
+    pub fn new(origin: Vec3, dir: Vec3) -> Self {
+        Self {
+            origin,
+            direction: dir,
+            dir_inv: dir.recip(),
+        }
+    }
 }
 
 impl Triangle<Vec3> {
+    #[inline]
     pub fn intersection(self, ray: Ray) -> Option<Vec3> {
         // https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
         let [v0, v1, v2] = self.0;
@@ -156,31 +168,62 @@ impl Triangle<Vec3> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Range<T> {
+    pub start: T,
+    pub end: T,
+}
+
+impl<T: PartialOrd> Range<T> {
+    pub fn is_empty(&self) -> bool {
+        self.end <= self.start
+    }
+}
+
+impl<T> std::ops::Index<Range<usize>> for [T] {
+    type Output = [T];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        self.index(index.start..index.end)
+    }
+}
+
+impl<T> std::ops::IndexMut<Range<usize>> for [T] {
+    fn index_mut(&mut self, index: Range<usize>) -> &mut Self::Output {
+        self.index_mut(index.start..index.end)
+    }
+}
+
+impl<T> std::ops::Index<Range<usize>> for Vec<T> {
+    type Output = [T];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        self.index(index.start..index.end)
+    }
+}
+
+impl<T> std::ops::IndexMut<Range<usize>> for Vec<T> {
+    fn index_mut(&mut self, index: Range<usize>) -> &mut Self::Output {
+        self.index_mut(index.start..index.end)
+    }
+}
+
 impl BoundingBox<Vec3> {
     pub fn intersection(self, ray: Ray) -> Range<f32> {
-        // https://tavianator.com/2022/ray_box_boundary.html
-        let mut tmin = 0.0;
-        let mut tmax = f32::INFINITY;
+        // inspired by https://tavianator.com/2022/ray_box_boundary.html
+        let t1 = (self.min - ray.origin) * ray.dir_inv;
+        let t2 = (self.max - ray.origin) * ray.dir_inv;
 
-        let t1 = (self.min.x - ray.origin.x) / ray.direction.x;
-        let t2 = (self.max.x - ray.origin.x) / ray.direction.x;
+        let t3 = t1.min(t2);
+        let t4 = t1.max(t2);
 
-        tmin = f32::max(tmin, f32::min(t1, t2));
-        tmax = f32::min(tmax, f32::max(t1, t2));
+        let tmin = t3.max_element();
+        let tmax = t4.min_element();
 
-        let t1 = (self.min.y - ray.origin.y) / ray.direction.y;
-        let t2 = (self.max.y - ray.origin.y) / ray.direction.y;
-
-        tmin = f32::max(tmin, f32::min(t1, t2));
-        tmax = f32::min(tmax, f32::max(t1, t2));
-
-        let t1 = (self.min.z - ray.origin.z) / ray.direction.z;
-        let t2 = (self.max.z - ray.origin.z) / ray.direction.z;
-
-        tmin = f32::max(tmin, f32::min(t1, t2));
-        tmax = f32::min(tmax, f32::max(t1, t2));
-
-        tmin..tmax
+        Range {
+            start: tmin,
+            end: tmax,
+        }
     }
 }
 
@@ -205,8 +248,7 @@ pub struct Bvh<T> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct BVHNode<V> {
-    // Range<usize>
-    pub triangles: (usize, usize),
+    pub triangles: Range<usize>,
     // index in BVHState::nodes to the first of a pair of children nodes
     pub children: Option<usize>,
     pub bb: BoundingBox<V>,
@@ -238,7 +280,10 @@ impl<T: VecT> Bvh<T> {
         let mut nodes = Vec::with_capacity(4 * triangles.len() / FACTOR);
 
         nodes.push(BVHNode {
-            triangles: (0, triangles.len()),
+            triangles: Range {
+                start: 0,
+                end: triangles.len(),
+            },
             children: None,
             bb: Default::default(),
             depth: 0,
@@ -255,7 +300,7 @@ impl<T: VecT> Bvh<T> {
                 let node = &mut nodes[i];
                 let t = node.triangles;
 
-                let triangles = &mut triangles[t.0..t.1];
+                let triangles = &mut triangles[t];
 
                 // I tested building the boundingbox at the end but it produced a worse
                 // bvh tree so it's not worth it.
@@ -277,13 +322,19 @@ impl<T: VecT> Bvh<T> {
 
                     node.children = Some(nodes_len);
                     nodes.push(BVHNode {
-                        triangles: (t.0, t.0 + mid),
+                        triangles: Range {
+                            start: t.start,
+                            end: t.start + mid,
+                        },
                         children: None,
                         bb: Default::default(),
                         depth: height,
                     });
                     nodes.push(BVHNode {
-                        triangles: (t.0 + mid, t.1),
+                        triangles: Range {
+                            start: t.start + mid,
+                            end: t.end,
+                        },
                         children: None,
                         bb: Default::default(),
                         depth: height,
@@ -385,7 +436,7 @@ mod tests {
                 .set(
                     "stroke",
                     colour(
-                        (node.triangles.0 as f32) * hue_factor,
+                        (node.triangles.start as f32) * hue_factor,
                         0.5 + ((bvh.height - depth) as f32 + 3.0).recip(),
                     ),
                 ),
@@ -396,10 +447,7 @@ mod tests {
                 .add(bvh_to_svg(bvh, i, depth + 1))
                 .add(bvh_to_svg(bvh, i + 1, depth + 1));
         } else {
-            for (i, t) in bvh.triangles[node.triangles.0..node.triangles.1]
-                .iter()
-                .enumerate()
-            {
+            for (i, t) in bvh.triangles[node.triangles].iter().enumerate() {
                 let [l, m, n] = t.0;
                 let data = Data::new()
                     .move_to((l.x as i32, l.y as i32))
@@ -411,7 +459,7 @@ mod tests {
                     .set(
                         "stroke",
                         colour(
-                            (node.triangles.0 + i) as f32 * hue_factor,
+                            (node.triangles.start + i) as f32 * hue_factor,
                             0.5 + (bvh.height as f32 + 3.0).recip(),
                         ),
                     )

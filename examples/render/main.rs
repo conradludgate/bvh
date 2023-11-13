@@ -154,7 +154,8 @@ fn render(
                     let y = ((yp as i32 - HEIGHT as i32 / 2) * AA + yaa) as f32 * scale;
                     let direction = (y * Vec3::Y + x * side + direction).normalize();
 
-                    if let Some((_, t)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count)
+                    if let Some((_, t)) =
+                        test(bvh, 0, Ray::new(origin, direction), bb_count, t_count)
                     {
                         let n = t.normal().normalize();
                         // https://math.stackexchange.com/a/13263
@@ -198,7 +199,6 @@ fn test(
             swap(&mut l, &mut r);
             swap(&mut l1, &mut r1);
         }
-        debug_assert!(!l1.is_empty());
 
         // test the closest bounding box
         if let Some((dist, i)) = test(bvh, l, ray, bb_count, t_count) {
@@ -218,7 +218,7 @@ fn test(
         }
     } else {
         let tri = node.triangles;
-        bvh.triangles[tri.0..tri.1]
+        bvh.triangles[tri]
             .iter()
             .filter_map(|t| {
                 *t_count += 1;
