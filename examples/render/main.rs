@@ -44,8 +44,8 @@ fn main() {
 
     println!("Loaded geometry");
 
-    let c = 2;
-    let d = 10.0;
+    let c = 3;
+    let d = 7.0;
     for i in -c..=c {
         for j in -c..=c {
             for k in -c..=c {
@@ -72,9 +72,8 @@ fn main() {
     println!("Generated scene index (height={})", bvh.height);
 
     let size = bvh.nodes[0].bb.size().max_element();
-    // let center = (bvh.bb.min + bvh.bb.max) / 2.0;
 
-    let views = 36; //360 * 3;
+    let views = 360 * 3;
     let progress = ProgressBar::new(views * (WIDTH * HEIGHT) as u64 * (AA * AA) as u64)
         .with_elapsed(start.elapsed());
     progress.set_style(
@@ -165,17 +164,13 @@ fn render(
 
                         let a = (angle_with_sun.cos().abs() * 255.0) as i32;
                         colour += a;
-                        // image.put_pixel(xp, yp, Rgba([a, a, a, 255]));
-                        // image.put_pixel(xp, yp, Rgba([255, 255, 255, 255]));
-                    } else {
-                        // image.put_pixel(xp, yp, Rgba([0, 0, 0, 255]));
                     }
                 }
             }
-            progress.inc((AA * AA) as u64);
             let c = (colour / AA / AA) as u8;
             image.put_pixel(xp, yp, Rgba([c, c, c, 255]));
         }
+        progress.inc(HEIGHT as u64 * (AA * AA) as u64);
     }
 
     image
