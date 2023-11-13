@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use bvh::{BVHState, Bvh, Ray, TotalF32, Triangle};
+use bvh::{Bvh, Ray, TotalF32, Triangle};
 use glam::{vec3, Vec3};
 use image::{codecs::gif::GifEncoder, Delay, Frame, Rgba, RgbaImage};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -67,14 +67,14 @@ fn main() {
 
     println!("Built scene (triangles={})", triangles.len());
 
-    let bvh = Bvh::new(BVHState::new(triangles));
+    let bvh = Bvh::new(triangles);
 
     println!("Generated scene index (height={})", bvh.height);
 
-    let size = bvh.state.nodes[0].bb.size().max_element();
+    let size = bvh.nodes[0].bb.size().max_element();
     // let center = (bvh.bb.min + bvh.bb.max) / 2.0;
 
-    let views = 360 * 3;
+    let views = 36; //360 * 3;
     let progress = ProgressBar::new(views * (WIDTH * HEIGHT) as u64 * (AA * AA) as u64)
         .with_elapsed(start.elapsed());
     progress.set_style(
@@ -138,25 +138,25 @@ fn render(
     progress: &ProgressBar,
 ) -> RgbaImage {
     let mut image = image::RgbaImage::new(WIDTH, HEIGHT);
-    let bb = bvh.state.nodes[0].bb;
+    let bb = bvh.nodes[0].bb;
     let center = (bb.min + bb.max) / 2.0;
     let direction = (center - origin).normalize();
 
     let side = direction.cross(Vec3::Y);
 
     let scale = SCALE / (AA as f32);
-    for xp in 0..image.width() {
-        for yp in 0..image.height() {
+    for xp in 0..WIDTH {
+        for yp in 0..HEIGHT {
             let mut colour = 0;
             for xaa in 0..AA {
                 for yaa in 0..AA {
-                    let x = ((xp as i32 - image.width() as i32 / 2) * AA + xaa) as f32 * scale;
-                    let y = ((yp as i32 - image.height() as i32 / 2) * AA + yaa) as f32 * scale;
+                    let x = ((xp as i32 - WIDTH as i32 / 2) * AA + xaa) as f32 * scale;
+                    let y = ((yp as i32 - HEIGHT as i32 / 2) * AA + yaa) as f32 * scale;
                     let direction = (y * Vec3::Y + x * side + direction).normalize();
 
                     if let Some((_, i)) = test(bvh, 0, Ray { origin, direction }, bb_count, t_count)
                     {
-                        let t = bvh.state.triangles[i];
+                        let t = bvh.triangles[i];
                         let n = t.normal().normalize();
                         // https://math.stackexchange.com/a/13263
                         let r = direction - 2.0 * (direction.dot(n)) * n;
@@ -170,9 +170,9 @@ fn render(
                     } else {
                         // image.put_pixel(xp, yp, Rgba([0, 0, 0, 255]));
                     }
-                    progress.inc(1);
                 }
             }
+            progress.inc((AA * AA) as u64);
             let c = (colour / AA / AA) as u8;
             image.put_pixel(xp, yp, Rgba([c, c, c, 255]));
         }
@@ -188,12 +188,12 @@ fn test(
     bb_count: &mut usize,
     t_count: &mut usize,
 ) -> Option<(f32, usize)> {
-    let node = bvh.state.nodes[node];
+    let node = bvh.nodes[node];
     if let Some(child) = node.children {
         let mut l = child;
         let mut r = child + 1;
-        let mut l1 = bvh.state.nodes[l].bb.intersection(ray);
-        let mut r1 = bvh.state.nodes[r].bb.intersection(ray);
+        let mut l1 = bvh.nodes[l].bb.intersection(ray);
+        let mut r1 = bvh.nodes[r].bb.intersection(ray);
         *bb_count += 2;
         if l1.is_empty() || (!r1.is_empty() && l1.start > r1.start) {
             swap(&mut l, &mut r);
@@ -219,7 +219,7 @@ fn test(
         }
     } else {
         let tri = node.triangles;
-        bvh.state.triangles[tri.0..tri.1]
+        bvh.triangles[tri.0..tri.1]
             .iter()
             .enumerate()
             .filter_map(|(i, t)| {

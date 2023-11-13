@@ -198,22 +198,9 @@ impl<V: VecT> BoundingBox<V> {
 }
 
 pub struct Bvh<T> {
-    pub state: BVHState<T>,
-    pub height: usize,
-}
-
-pub struct BVHState<T> {
     pub triangles: Vec<Triangle<T>>,
     pub nodes: Vec<BVHNode<T>>,
-}
-
-impl<T> BVHState<T> {
-    pub fn new(triangles: Vec<Triangle<T>>) -> Self {
-        Self {
-            nodes: Vec::with_capacity(triangles.len().ilog2() as usize),
-            triangles,
-        }
-    }
+    pub height: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -223,7 +210,7 @@ pub struct BVHNode<V> {
     // index in BVHState::nodes to the first of a pair of children nodes
     pub children: Option<usize>,
     pub bb: BoundingBox<V>,
-    // pub height: usize,
+    pub depth: usize,
 }
 
 pub struct TotalF32(pub f32);
@@ -244,28 +231,31 @@ impl Ord for TotalF32 {
     }
 }
 
-impl<T: VecT> Bvh<T> {
-    pub fn new(mut state: BVHState<T>) -> Bvh<T> {
-        state.nodes.clear();
+const FACTOR: usize = 8;
 
-        state.nodes.push(BVHNode {
-            triangles: (0, state.triangles.len()),
+impl<T: VecT> Bvh<T> {
+    pub fn new(mut triangles: Vec<Triangle<T>>) -> Bvh<T> {
+        let mut nodes = Vec::with_capacity(4 * triangles.len() / FACTOR);
+
+        nodes.push(BVHNode {
+            triangles: (0, triangles.len()),
             children: None,
             bb: Default::default(),
+            depth: 0,
         });
 
         let mut height = 0;
         let mut i = 0;
 
         loop {
-            let j = state.nodes.len();
+            let j = nodes.len();
 
             for i in i..j {
-                let nodes_len = state.nodes.len();
-                let node = &mut state.nodes[i];
+                let nodes_len = nodes.len();
+                let node = &mut nodes[i];
                 let t = node.triangles;
 
-                let triangles = &mut state.triangles[t.0..t.1];
+                let triangles = &mut triangles[t.0..t.1];
 
                 node.bb = triangles
                     .iter()
@@ -273,7 +263,7 @@ impl<T: VecT> Bvh<T> {
                     .tree_fold1(BoundingBox::merge)
                     .expect("triangles length should be > 0");
 
-                if triangles.len() > 4 {
+                if triangles.len() > FACTOR {
                     let axes = T::axes();
                     let axis = (0..axes)
                         .max_by_key(|&axis| TotalF32(node.bb.size().axis(axis)))
@@ -284,15 +274,17 @@ impl<T: VecT> Bvh<T> {
                         .select_nth_unstable_by_key(mid, |t| TotalF32(t.centroid().axis(axis)));
 
                     node.children = Some(nodes_len);
-                    state.nodes.push(BVHNode {
+                    nodes.push(BVHNode {
                         triangles: (t.0, t.0 + mid),
                         children: None,
                         bb: Default::default(),
+                        depth: height,
                     });
-                    state.nodes.push(BVHNode {
+                    nodes.push(BVHNode {
                         triangles: (t.0 + mid, t.1),
                         children: None,
                         bb: Default::default(),
+                        depth: height,
                     });
                 }
             }
@@ -304,7 +296,11 @@ impl<T: VecT> Bvh<T> {
             height += 1;
         }
 
-        Bvh { state, height }
+        Bvh {
+            nodes,
+            triangles,
+            height,
+        }
     }
 }
 
@@ -319,7 +315,7 @@ mod tests {
         Document, Node,
     };
 
-    use crate::{BVHState, Bvh, Triangle};
+    use crate::{Bvh, Triangle};
 
     #[test]
     fn test_bvh() {
@@ -359,7 +355,7 @@ mod tests {
 
         let mut doc = Document::new().set("viewBox", (0, 0, 1000, 1000));
 
-        let bvh = Bvh::new(BVHState::new(triangles));
+        let bvh = Bvh::new(triangles);
 
         dbg!(bvh.height);
 
@@ -373,10 +369,10 @@ mod tests {
 
     fn bvh_to_svg(bvh: &Bvh<Vec2>, node: usize, depth: usize) -> Box<dyn Node> {
         let mut group = Group::new();
-        let node = bvh.state.nodes[node];
+        let node = bvh.nodes[node];
         let size = node.bb.size();
 
-        let hue_factor = TAU / (bvh.state.triangles.len() as f32);
+        let hue_factor = TAU / (bvh.triangles.len() as f32);
 
         group = group.add(
             Rectangle::new()
@@ -398,7 +394,7 @@ mod tests {
                 .add(bvh_to_svg(bvh, i, depth + 1))
                 .add(bvh_to_svg(bvh, i + 1, depth + 1));
         } else {
-            for (i, t) in bvh.state.triangles[node.triangles.0..node.triangles.1]
+            for (i, t) in bvh.triangles[node.triangles.0..node.triangles.1]
                 .iter()
                 .enumerate()
             {

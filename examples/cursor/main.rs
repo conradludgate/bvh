@@ -1,24 +1,20 @@
-use bvh::{BVHNode, BoundingBox, Triangle};
+use bvh::{BoundingBox, Bvh, Triangle};
 use nannou::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use typed_arena::Arena;
 
-struct Model<'a> {
+struct Model {
     _rng: StdRng,
-    triangles: Vec<Triangle<Vec2>>,
-    bvh: &'a bvh::BVHNode<'a, Vec2>,
+    bvh: Bvh<Vec2>,
 }
 
 fn main() {
-    let arena = Box::leak(Box::new(Arena::new()));
-
-    nannou::app(Box::new(|app| model(&*arena, app)))
+    nannou::app(Box::new(model))
         .event(event)
         .simple_window(view)
         .run();
 }
 
-fn model<'a>(arena: &'a Arena<BVHNode<'a, Vec2>>, _app: &App) -> Model<'a> {
+fn model(_app: &App) -> Model {
     let x_range = -500.0..500.0;
     let y_range = -500.0..500.0;
     let r_range = 20.0..60.0;
@@ -52,13 +48,9 @@ fn model<'a>(arena: &'a Arena<BVHNode<'a, Vec2>>, _app: &App) -> Model<'a> {
         ]));
     }
 
-    let bvh = BVHNode::new(arena, &mut triangles, 0);
+    let bvh = Bvh::new(triangles);
 
-    Model {
-        _rng: rng,
-        triangles,
-        bvh,
-    }
+    Model { _rng: rng, bvh }
 }
 
 fn event(_app: &App, _model: &mut Model, _event: Event) {}
@@ -67,7 +59,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
     draw.background().color(BLACK);
 
-    let bb_size = model.bvh.bb.size();
+    let bb_size = model.bvh.nodes[0].bb.size();
     let scale = vec2(
         app.window_rect().w() / bb_size.x,
         app.window_rect().h() / bb_size.y,
@@ -75,25 +67,20 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let mouse = vec2(app.mouse.x / scale.x, app.mouse.y / scale.y);
 
-    draw_bvh(&draw, &model.triangles, model.bvh, mouse, scale);
+    draw_bvh(&draw, &model.bvh, 0, mouse, scale);
 
     draw.to_frame(app, &frame).unwrap();
 }
 
-fn draw_bvh<'a>(
-    draw: &Draw,
-    triangles: &[Triangle<Vec2>],
-    bvh: &'a BVHNode<'a, Vec2>,
-    mouse: Vec2,
-    scale: Vec2,
-) {
-    if bvh.bb.point_inside(mouse) {
-        draw_bb(draw, bvh.bb, scale);
-        if let Some([left, right]) = bvh.children {
-            draw_bvh(draw, triangles, left, mouse, scale);
-            draw_bvh(draw, triangles, right, mouse, scale);
+fn draw_bvh(draw: &Draw, bvh: &Bvh<Vec2>, node: usize, mouse: Vec2, scale: Vec2) {
+    let node = bvh.nodes[node];
+    if node.bb.point_inside(mouse) {
+        draw_bb(draw, node.bb, scale);
+        if let Some(left) = node.children {
+            draw_bvh(draw, bvh, left, mouse, scale);
+            draw_bvh(draw, bvh, left + 1, mouse, scale);
         } else {
-            for &triangle in &triangles[bvh.triangles.0..bvh.triangles.1] {
+            for &triangle in &bvh.triangles[node.triangles.0..node.triangles.1] {
                 draw_triangle(draw, triangle, mouse, scale)
             }
         }
