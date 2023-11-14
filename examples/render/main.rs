@@ -1,11 +1,10 @@
 use std::{
     fs::OpenOptions,
-    mem::swap,
     sync::atomic::{self, AtomicUsize},
     time::Instant,
 };
 
-use bvh::{Bvh, Ray, TotalF32, Triangle};
+use bvh::{BVHNode, Bvh, Ray, Triangle};
 use glam::{vec3, Vec3};
 use image::{codecs::gif::GifEncoder, Delay, Frame, Rgba, RgbaImage};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -153,9 +152,8 @@ fn render(
                     let y = ((yp as i32 - HEIGHT as i32 / 2) * AA + yaa) as f32 * scale;
                     let direction = (y * Vec3::Y + x * side + direction).normalize();
 
-                    if let Some((_, t)) =
-                        test(bvh, 0, Ray::new(origin, direction), bb_count, t_count)
-                    {
+                    let (dist, t) = test(bvh, 0, Ray::new(origin, direction), bb_count, t_count);
+                    if dist.is_finite() {
                         let n = t.normal().normalize();
                         // https://math.stackexchange.com/a/13263
                         let r = direction - 2.0 * (direction.dot(n)) * n;
@@ -182,44 +180,66 @@ fn test(
     ray: Ray,
     bb_count: &mut usize,
     t_count: &mut usize,
-) -> Option<(f32, Triangle<Vec3>)> {
+) -> (f32, Triangle<Vec3>) {
     let node = bvh.nodes[node];
     if let Some(child) = node.children {
-        let mut l = child;
-        let mut r = child + 1;
-        let [mut l1, mut r1] = ray.box_intersections([bvh.nodes[l].bb, bvh.nodes[r].bb]);
+        let l = child;
+        let r = child + 1;
         *bb_count += 2;
-        if l1.is_empty() || (!r1.is_empty() && l1.start > r1.start) {
-            swap(&mut l, &mut r);
-            swap(&mut l1, &mut r1);
-        }
+        let [l1, r1] = ray.box_intersections([bvh.nodes[l].bb, bvh.nodes[r].bb]);
 
-        // test the closest bounding box
-        if let Some((dist, i)) = test(bvh, l, ray, bb_count, t_count) {
-            // if the closest triangle is further than the second bb, test the second
-            if !r1.is_empty() && dist >= r1.start {
-                if let Some((dist1, i1)) = test(bvh, r, ray, bb_count, t_count) {
-                    if dist1 < dist {
-                        return Some((dist1, i1));
-                    }
-                }
-            }
-            Some((dist, i))
-        } else if !r1.is_empty() {
+        if l1.is_empty() {
             test(bvh, r, ray, bb_count, t_count)
+        } else if r1.is_empty() {
+            test(bvh, l, ray, bb_count, t_count)
+        } else if l1.start < r1.start {
+            test_2bb(bvh, l, r, r1.start, ray, bb_count, t_count)
         } else {
-            None
+            test_2bb(bvh, r, l, l1.start, ray, bb_count, t_count)
         }
     } else {
-        let tri = node.triangles;
-        bvh.triangles[tri]
-            .iter()
-            .filter_map(|t| {
-                *t_count += 1;
-                let p = t.intersection(ray)?;
-                let dist = p.distance(ray.origin);
-                Some((dist, *t))
-            })
-            .min_by_key(|&(dist, _)| TotalF32(dist))
+        test_triangles(bvh, node, ray, t_count)
     }
+}
+
+fn test_triangles(
+    bvh: &Bvh<Vec3>,
+    node: BVHNode<Vec3>,
+    ray: Ray,
+    t_count: &mut usize,
+) -> (f32, Triangle<Vec3>) {
+    let mut dist = f32::INFINITY;
+    let mut triangle = Triangle([Vec3::ZERO; 3]);
+    for &t in &bvh.triangles[node.triangles] {
+        *t_count += 1;
+        if let Some(p) = t.intersection(ray) {
+            let d = p.distance(ray.origin);
+            if d < dist {
+                dist = d;
+                triangle = t;
+            }
+        }
+    }
+    (dist, triangle)
+}
+
+fn test_2bb(
+    bvh: &Bvh<Vec3>,
+    l: usize,
+    r: usize,
+    r1: f32,
+    ray: Ray,
+    bb_count: &mut usize,
+    t_count: &mut usize,
+) -> (f32, Triangle<Vec3>) {
+    let (dist, triangle) = test(bvh, l, ray, bb_count, t_count);
+
+    if dist > r1 {
+        let (dist1, t1) = test(bvh, r, ray, bb_count, t_count);
+        if dist1 < dist {
+            return (dist1, t1);
+        }
+    }
+
+    (dist, triangle)
 }

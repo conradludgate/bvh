@@ -83,8 +83,6 @@ fn main() {
 
     let frame = render(&bvh, origin, &mut bb, &mut t, &progress);
 
-    // frame
-
     println!(
         "performed {bb:?} bounding box intersection tests and {t:?} triangle intersection tests"
     );
